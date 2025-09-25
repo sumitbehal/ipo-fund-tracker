@@ -17,19 +17,16 @@ def scrape_ipo():
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
 
-    ipo_list = []
-
-    table = soup.find("table", {"class": "tblIPO"})  # Adjust if table class is different
+    table = soup.find("table", class_="tblIPO")
     if not table:
         print("Could not find IPO table on the page.")
         return []
 
-    rows = table.find_all("tr")[1:]  # Skip header
-
-    for row in rows:
+    ipo_list = []
+    for row in table.find("tbody").find_all("tr"):
         cols = row.find_all("td")
-        if len(cols) < 10:
-            continue  # Skip incomplete rows
+        if len(cols) != 10:
+            continue
         try:
             ipo_data = {
                 "name": cols[0].text.strip(),
@@ -53,9 +50,8 @@ def scrape_ipo():
 # Filter top 2 IPOs with GMP > 10%
 def select_top_ipos(ipo_list):
     filtered = [ipo for ipo in ipo_list if ipo['gmp'] > 10]
-    # Sort by GMP descending
     filtered.sort(key=lambda x: x['gmp'], reverse=True)
-    return filtered[:2]  # Top 2
+    return filtered[:2]
 
 # Compose Telegram message
 def compose_message(top_ipos):
@@ -90,6 +86,6 @@ async def main():
     bot = Bot(token=bot_token)
     await bot.send_message(chat_id=chat_id, text=message)
 
-# Run
+# Run the async function
 if __name__ == "__main__":
     asyncio.run(main())
