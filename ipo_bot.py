@@ -11,23 +11,13 @@ async def scrape_live_ipos():
         page = await browser.new_page()
         await page.goto(URL, wait_until="networkidle")
 
-        # Wait for the table to fully load
-        await asyncio.sleep(5)  # allow JS to render table
+        # Wait longer for JS table to load
+        await asyncio.sleep(10)
 
-        # Try multiple table selectors in case structure changes
-        possible_selectors = [
-            "table#tbl_live_ipo tbody tr",
-            "table.dataTable tbody tr",
-            "table tbody tr"
-        ]
-        rows = []
-        for selector in possible_selectors:
-            rows = await page.query_selector_all(selector)
-            if rows:
-                break
-
+        # Use a general selector for table rows
+        rows = await page.query_selector_all("table tbody tr")
         if not rows:
-            print("No IPO rows found, table may not be loaded yet.")
+            print("No IPO rows found. Table may not be loaded yet.")
             await browser.close()
             return []
 
@@ -90,6 +80,12 @@ async def main():
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
     ipo_list = await scrape_live_ipos()
+
+    # DEBUG: print all scraped IPOs
+    print("DEBUG: All IPOs scraped:")
+    for ipo in ipo_list:
+        print(f"{ipo['name']} - GMP: {ipo['gmp']}%")
+
     filtered_ipos = filter_ipos(ipo_list)
     message = compose_message(filtered_ipos)
 
