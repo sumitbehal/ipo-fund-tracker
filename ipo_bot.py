@@ -1,10 +1,15 @@
 import os
 from telegram import Bot
 
-# Load secrets from GitHub Actions
-bot_token = os.getenv("8287714366:AAF9fWj595ToFnphCEJwFHv8022uBCH03WY")
-chat_id = os.getenv("1707794890")
+# Load secrets from environment variables
+bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
+# Debug prints (optional, remove after testing)
+print("Bot token:", bot_token)
+print("Chat ID:", chat_id)
+
+# Initialize bot
 bot = Bot(token=bot_token)
 
 # Send test message
