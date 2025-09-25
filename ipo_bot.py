@@ -11,10 +11,10 @@ async def scrape_live_ipos():
         page = await browser.new_page()
         await page.goto(URL, wait_until="networkidle")
 
-        # Wait a bit for JS to load table
-        await asyncio.sleep(5)
+        # Wait for the table to fully load
+        await asyncio.sleep(5)  # allow JS to render table
 
-        # Try multiple selectors in case the table ID changes
+        # Try multiple table selectors in case structure changes
         possible_selectors = [
             "table#tbl_live_ipo tbody tr",
             "table.dataTable tbody tr",
@@ -38,14 +38,21 @@ async def scrape_live_ipos():
             if len(cols) < 6:
                 continue
             try:
-                gmp_text = (await cols[1].inner_text()).replace('%','').replace(',','').strip()
+                # Extract GMP safely
+                gmp_td = await cols[1].query_selector("span")
+                gmp_text = (
+                    (await gmp_td.inner_text()).replace('%','').replace(',','').strip()
+                    if gmp_td else (await cols[1].inner_text()).replace('%','').replace(',','').strip()
+                )
+                gmp_value = float(gmp_text) if gmp_text and gmp_text != '--' else 0
+
                 ipo = {
                     "name": (await cols[0].inner_text()).strip(),
-                    "gmp": float(gmp_text) if gmp_text else 0,
+                    "gmp": gmp_value,
                     "retail_shares": (await cols[2].inner_text()).strip(),
                     "retail_amount": (await cols[3].inner_text()).strip(),
                     "hni_shares": (await cols[4].inner_text()).strip(),
-                    "hni_amount": (await cols[5].inner_text()).strip()
+                    "hni_amount": (await cols[5].inner_text()).strip(),
                 }
                 ipo_list.append(ipo)
             except Exception as e:
