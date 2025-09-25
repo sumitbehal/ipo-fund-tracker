@@ -1,120 +1,38 @@
-import os
-import asyncio
 import requests
 from bs4 import BeautifulSoup
-from telegram import Bot
-
-# -------------------------
-# Load secrets
-# -------------------------
-bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-chat_id = os.getenv("TELEGRAM_CHAT_ID")
-
-if not bot_token or not chat_id:
-    raise ValueError("Bot token or chat ID not found in environment variables!")
-
-# -------------------------
-# Chittorgarh IPO scraping
-# -------------------------
-URL = "https://www.chittorgarh.com/report/ipo-calendar/"
 
 def scrape_ipo():
-    res = requests.get(URL)
-    res.raise_for_status()
+    url = "https://www.chittorgarh.com/calendar/ipo-calendar/1/"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/116.0.0.0 Safari/537.36"
+    }
+
+    res = requests.get(url, headers=headers)
+    res.raise_for_status()  # Will raise an error if request fails
     soup = BeautifulSoup(res.text, "html.parser")
 
-    ipo_data = []
+    ipo_list = []
 
-    # The IPO table is usually the first table with class 'table' (verify on website)
-    table = soup.find("table", class_="table")
-    if not table:
-        print("No table found on the page!")
-        return ipo_data
-
-    rows = table.find_all("tr")[1:]  # skip header
+    # Adjust these selectors according to the page structure
+    table = soup.find("table", {"class": "tblIPO"})  # Example table class
+    rows = table.find_all("tr")[1:]  # Skip header row
 
     for row in rows:
-        cols = [c.get_text(strip=True) for c in row.find_all("td")]
-        if len(cols) < 12:
-            continue
+        cols = row.find_all("td")
+        ipo_data = {
+            "name": cols[0].text.strip(),
+            "open_date": cols[1].text.strip(),
+            "close_date": cols[2].text.strip(),
+            "gmp": float(cols[3].text.strip().replace('%','')) if cols[3].text.strip() else 0,
+            "retail_shares": cols[4].text.strip(),
+            "retail_amount": cols[5].text.strip(),
+            "hni_shares": cols[6].text.strip(),
+            "hni_amount": cols[7].text.strip(),
+            "bhni_shares": cols[8].text.strip(),
+            "bhni_amount": cols[9].text.strip()
+        }
+        ipo_list.append(ipo_data)
 
-        ipo_type = cols[2]  # Type column
-        if "Mainboard" not in ipo_type:
-            continue  # skip non-mainboard IPOs
-
-        try:
-            ipo = {
-                "name": cols[0],
-                "opening_date": cols[4],
-                "closing_date": cols[5],
-                "issue_price": float(cols[6].replace(",", "")),
-                "retail_shares": int(cols[7].replace(",", "")),
-                "hni_shares": int(cols[8].replace(",", "")),
-                "bhni_shares": int(cols[9].replace(",", "")),
-                "gmp": float(cols[10].replace("%", "")) if cols[10] else 0,
-            }
-            ipo_data.append(ipo)
-        except Exception as e:
-            print(f"Skipping row due to error: {e}")
-
-    return ipo_data
-
-# -------------------------
-# Calculate fund
-# -------------------------
-def calculate_fund(ipo_data):
-    message_lines = []
-    total_fund = 0
-
-    for ipo in ipo_data:
-        if ipo["gmp"] < 10:
-            continue  # Only consider GMP > 10%
-
-        retail_amount = ipo["issue_price"] * ipo["retail_shares"]
-        hni_amount = ipo["issue_price"] * ipo["hni_shares"]
-        bhni_amount = ipo["issue_price"] * ipo["bhni_shares"]
-
-        total_fund += retail_amount + hni_amount + bhni_amount
-
-        lines = [
-            f"{ipo['name']}",
-            f"   - Opening: {ipo['opening_date']}",
-            f"   - Closing: {ipo['closing_date']}",
-            f"   - GMP: {ipo['gmp']}%",
-            f"   - Retail: {ipo['retail_shares']} shares → ₹{retail_amount:,}",
-            f"   - HNI: {ipo['hni_shares']} shares → ₹{hni_amount:,}",
-            f"   - BHNI: {ipo['bhni_shares']} shares → ₹{bhni_amount:,}",
-        ]
-        message_lines.append("\n".join(lines))
-
-    return total_fund, message_lines
-
-# -------------------------
-# Telegram async function
-# -------------------------
-async def main():
-    bot = Bot(token=bot_token)
-
-    ipo_data = scrape_ipo()
-    if not ipo_data:
-        await bot.send_message(chat_id=chat_id, text="No Mainboard IPOs found today.")
-        return
-
-    total_fund, message_lines = calculate_fund(ipo_data)
-
-    if total_fund == 0:
-        await bot.send_message(chat_id=chat_id, text="No Mainboard IPOs require funds today (GMP < 10%).")
-        return
-
-    message = "📢 Today's Mainboard IPO Fund Update:\n\n"
-    message += "\n\n".join(message_lines)
-    message += f"\n\n💰 Total Fund Required: ₹{total_fund:,}"
-
-    await bot.send_message(chat_id=chat_id, text=message)
-    print("Message sent successfully!")
-
-# -------------------------
-# Run
-# -------------------------
-if __name__ == "__main__":
-    asyncio.run(main())
+    return ipo_list
