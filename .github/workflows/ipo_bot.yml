@@ -1,32 +1,28 @@
 name: Daily IPO Fund Bot
 
-# Run daily at 9 AM IST or manually
 on:
   schedule:
     - cron: '30 3 * * *'  # 03:30 UTC = 9:00 AM IST
-  workflow_dispatch:       # Allows manual run
+  workflow_dispatch:
 
 jobs:
   ipo-bot:
     runs-on: ubuntu-latest
-
     steps:
-      # Step 1: Checkout repo
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      # Step 2: Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # Step 3: Install dependencies
       - name: Install dependencies
-        run: pip install python-telegram-bot requests beautifulsoup4
+        run: |
+          pip install playwright python-telegram-bot
+          playwright install
 
-      # Step 4: Run IPO bot
-      - name: Run IPO bot
+      - name: Run IPO Bot
         run: python ipo_bot.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
