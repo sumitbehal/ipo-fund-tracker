@@ -1,7 +1,6 @@
 import asyncio
-from datetime import datetime
-import os
 from telegram import Bot
+import os
 from playwright.async_api import async_playwright
 
 URL = "https://www.investorgain.com/report/live-ipo-gmp/331/ipo/"
@@ -11,9 +10,11 @@ async def scrape_live_ipos():
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         await page.goto(URL, wait_until="networkidle")
+        
+        # Wait for the table to fully load
+        await page.wait_for_selector("table#tbl_live_ipo tbody tr")
 
-        # Select the table rows
-        rows = await page.query_selector_all("table tbody tr")
+        rows = await page.query_selector_all("table#tbl_live_ipo tbody tr")
         ipo_list = []
 
         for row in rows:
@@ -21,9 +22,11 @@ async def scrape_live_ipos():
             if len(cols) < 6:
                 continue
             try:
+                # Clean GMP text
+                gmp_text = (await cols[1].inner_text()).replace('%','').replace(',','').strip()
                 ipo = {
                     "name": (await cols[0].inner_text()).strip(),
-                    "gmp": float((await cols[1].inner_text()).replace('%','').strip()),
+                    "gmp": float(gmp_text) if gmp_text else 0,
                     "retail_shares": (await cols[2].inner_text()).strip(),
                     "retail_amount": (await cols[3].inner_text()).strip(),
                     "hni_shares": (await cols[4].inner_text()).strip(),
