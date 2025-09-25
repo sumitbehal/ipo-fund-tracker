@@ -10,11 +10,27 @@ async def scrape_live_ipos():
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         await page.goto(URL, wait_until="networkidle")
-        
-        # Wait for the table to fully load
-        await page.wait_for_selector("table#tbl_live_ipo tbody tr")
 
-        rows = await page.query_selector_all("table#tbl_live_ipo tbody tr")
+        # Wait a bit for JS to load table
+        await asyncio.sleep(5)
+
+        # Try multiple selectors in case the table ID changes
+        possible_selectors = [
+            "table#tbl_live_ipo tbody tr",
+            "table.dataTable tbody tr",
+            "table tbody tr"
+        ]
+        rows = []
+        for selector in possible_selectors:
+            rows = await page.query_selector_all(selector)
+            if rows:
+                break
+
+        if not rows:
+            print("No IPO rows found, table may not be loaded yet.")
+            await browser.close()
+            return []
+
         ipo_list = []
 
         for row in rows:
@@ -22,7 +38,6 @@ async def scrape_live_ipos():
             if len(cols) < 6:
                 continue
             try:
-                # Clean GMP text
                 gmp_text = (await cols[1].inner_text()).replace('%','').replace(',','').strip()
                 ipo = {
                     "name": (await cols[0].inner_text()).strip(),
