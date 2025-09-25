@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import asyncio
 from telegram import Bot
 import os
+from datetime import datetime
 
 # Scrape Mainboard IPOs
 def scrape_ipo():
@@ -30,8 +31,8 @@ def scrape_ipo():
         try:
             ipo_data = {
                 "name": cols[0].text.strip(),
-                "open_date": cols[1].text.strip(),
-                "close_date": cols[2].text.strip(),
+                "open_date": datetime.strptime(cols[1].text.strip(), "%d-%m-%Y"),
+                "close_date": datetime.strptime(cols[2].text.strip(), "%d-%m-%Y"),
                 "gmp": float(cols[3].text.strip().replace('%','')) if cols[3].text.strip() else 0,
                 "retail_shares": cols[4].text.strip(),
                 "retail_amount": cols[5].text.strip(),
@@ -47,24 +48,28 @@ def scrape_ipo():
 
     return ipo_list
 
-# Filter top 2 IPOs with GMP > 10%
-def select_top_ipos(ipo_list):
-    filtered = [ipo for ipo in ipo_list if ipo['gmp'] > 10]
+# Filter IPOs currently open and GMP > 10%
+def select_open_ipos(ipo_list):
+    today = datetime.today()
+    filtered = [
+        ipo for ipo in ipo_list
+        if ipo['gmp'] > 10 and ipo['open_date'] <= today <= ipo['close_date']
+    ]
     filtered.sort(key=lambda x: x['gmp'], reverse=True)
-    return filtered[:2]
+    return filtered
 
 # Compose Telegram message
-def compose_message(top_ipos):
-    if not top_ipos:
-        return "📢 No Mainboard IPOs with GMP >10% today."
+def compose_message(ipos):
+    if not ipos:
+        return "📢 No Mainboard IPOs currently open with GMP >10% today."
 
     total_fund = 0
-    msg = "📢 Today's Mainboard IPO Fund Update:\n\n"
+    msg = "📢 Current Mainboard IPOs (Open & GMP >10%):\n\n"
 
-    for ipo in top_ipos:
+    for ipo in ipos:
         msg += f"{ipo['name']}\n"
-        msg += f"   - Opening: {ipo['open_date']}\n"
-        msg += f"   - Closing: {ipo['close_date']}\n"
+        msg += f"   - Opening: {ipo['open_date'].strftime('%d-%m-%Y')}\n"
+        msg += f"   - Closing: {ipo['close_date'].strftime('%d-%m-%Y')}\n"
         msg += f"   - GMP: {ipo['gmp']}%\n"
         msg += f"   - Retail: {ipo['retail_shares']} shares → {ipo['retail_amount']}\n"
         msg += f"   - HNI: {ipo['hni_shares']} shares → {ipo['hni_amount']}\n"
@@ -80,8 +85,8 @@ async def main():
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
 
     ipo_list = scrape_ipo()
-    top_ipos = select_top_ipos(ipo_list)
-    message = compose_message(top_ipos)
+    open_ipos = select_open_ipos(ipo_list)
+    message = compose_message(open_ipos)
 
     bot = Bot(token=bot_token)
     await bot.send_message(chat_id=chat_id, text=message)
