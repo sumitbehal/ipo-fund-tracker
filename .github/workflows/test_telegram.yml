@@ -1,25 +1,26 @@
-name: Test Telegram Bot
+name: Daily IPO Fund Bot
 
 on:
-  workflow_dispatch: # Allows manual run from Actions tab
+  schedule:
+    - cron: '30 4 * * *'   # 10:00 IST daily
+  workflow_dispatch:       # manual trigger
 
 jobs:
-  test-bot:
+  ipo-bot:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
-      - name: Install dependencies
-        run: pip install python-telegram-bot
-
-      - name: Run test script
+      - name: Install deps
+        run: |
+          pip install playwright python-telegram-bot
+          playwright install
+      - name: Run bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MIN_GMP: ${{ vars.MIN_GMP }}
+          FUND_PER_IPO_LAKH: ${{ vars.FUND_PER_IPO_LAKH }}
         run: python ipo_bot.py
