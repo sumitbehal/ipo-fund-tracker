@@ -12,6 +12,7 @@ DATE_FORMAT = "%d-%b-%Y"  # e.g. 25-Sep-2025
 
 # ---------- Helpers (Indian numbering) ----------
 def format_inr_number(n, decimals=0):
+    """Format number with Indian comma system (e.g., 3026376 -> 30,26,376)."""
     if n is None:
         return "-"
     neg = n < 0
@@ -45,10 +46,31 @@ def money_inr(n, decimals=0):
     return f"₹{format_inr_number(n, decimals)}"
 
 
+def clean_ipo_name(raw: str) -> str:
+    """
+    Normalize scraped IPO names:
+    - Convert trailing 'IPO X' (O/C/L/U etc.) to just 'IPO'
+    - Ensure final name ends with exactly 'IPO' (no duplicate 'O')
+    Examples:
+      'Pace Digitek IPO O' -> 'Pace Digitek IPO'
+      'Jinkushal Industries IPO' -> 'Jinkushal Industries IPO'
+      'TruAlt Bioenergy' -> 'TruAlt Bioenergy IPO'
+    """
+    if not raw:
+        return raw
+    s = raw.strip()
+    # Replace 'IPO <letter>' with 'IPO'
+    s = re.sub(r"\s+IPO\s*[A-Z]?$", " IPO", s, flags=re.IGNORECASE)
+    # Ensure it ends with IPO
+    if not s.upper().endswith("IPO"):
+        s = s.rstrip() + " IPO"
+    return s.strip()
+
+
 # ---------- Scraper (hardened for CI) ----------
 async def scrape_live_ipos():
     async with async_playwright() as p:
-        # Use --no-sandbox for GitHub Actions
+        # CI-friendly flags
         browser = await p.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-setuid-sandbox"]
@@ -60,7 +82,7 @@ async def scrape_live_ipos():
             viewport={"width": 1280, "height": 1800}
         )
 
-        # Block heavy assets to speed up and reduce “networkidle” flakiness
+        # Block heavy assets (fewer timeouts)
         async def _route(route):
             req = route.request
             if req.resource_type in {"image", "media", "font", "stylesheet"}:
@@ -70,26 +92,21 @@ async def scrape_live_ipos():
         await context.route("**/*", _route)
 
         page = await context.new_page()
-        page.set_default_timeout(60_000)  # 60s default
+        page.set_default_timeout(60_000)
 
-        # Robust navigation: use domcontentloaded, then wait for table
-        last_err = None
+        # Robust navigation (3 retries)
         for attempt in range(3):
             try:
                 await page.goto(URL, wait_until="domcontentloaded", timeout=60_000)
-                # give JS some time to hydrate, then wait for rows
                 await page.wait_for_selector("table tbody tr", timeout=60_000)
                 break
-            except Exception as e:
-                last_err = e
-                if attempt < 2:
-                    await asyncio.sleep(3)  # small backoff and retry
-                else:
+            except Exception:
+                if attempt == 2:
                     await browser.close()
                     raise
+                await asyncio.sleep(3)
 
-        # Small stabilizing pause; keeps your original spirit without 10s fixed wait
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(1.0)  # brief settle
 
         rows = await page.query_selector_all("table tbody tr")
         ipo_list = []
@@ -99,14 +116,15 @@ async def scrape_live_ipos():
             if len(cells) < 10:
                 continue
             try:
-                name = (await cells[0].inner_text()).strip()
+                raw_name = (await cells[0].inner_text()).strip()
+                name = clean_ipo_name(raw_name)
 
                 # GMP % (e.g., "₹32 (14.61%)")
                 gmp_text = (await cells[1].inner_text()).strip()
                 m = re.search(r"\(([-+]?\d+\.?\d*)\s*%", gmp_text)
                 gmp_percent = float(m.group(1)) if m else 0.0
 
-                # Price column (index 5) may be "100 / 105" → take upper band
+                # Price column (index 5) may be "100 / 105" → use upper band
                 price_text = (await cells[5].inner_text()).strip()
                 nums = re.findall(r"\d+(?:\.\d+)?", price_text.replace(",", ""))
                 price = max([float(x) for x in nums]) if nums else None
@@ -141,7 +159,7 @@ async def scrape_live_ipos():
         return ipo_list
 
 
-# ---------- Filters ----------
+# ---------- Filters (unchanged logic) ----------
 def filter_current_ipos(ipos):
     today = datetime.now().date()
     return [
@@ -173,7 +191,7 @@ def compose_telegram_message(ipos):
 
         section = []
         section.append("━━━━━━━━━━━━━━━━━━━━")
-        section.append(f"📌 {name} ")
+        section.append(f"📌 {name}")  # already normalized to end with "IPO"
         section.append("━━━━━━━━━━━━━━━━━━━━")
         section.append(f"▫️ GMP: **{gmp:.2f}%**")
         section.append(f"▫️ Open: {open_dt} → Close: {close_dt}")
@@ -181,7 +199,7 @@ def compose_telegram_message(ipos):
         if price and lot:
             section.append(f"▫️ Price: {money_inr(price, 2)} | Lot Size: {format_inr_number(lot)}")
 
-            lot_cost = price * lot  # internal
+            lot_cost = price * lot  # internal for funds math
 
             # Retail: 1 lot
             retail_lots = 1
