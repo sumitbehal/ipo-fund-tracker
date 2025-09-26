@@ -12,10 +12,6 @@ DATE_FORMAT = "%d-%b-%Y"  # e.g. 25-Sep-2025
 
 # ---------- Helpers (Indian numbering) ----------
 def format_inr_number(n, decimals=0):
-    """
-    Format number with Indian comma system.
-    3026376 -> 30,26,376 ; 14892 -> 14,892
-    """
     if n is None:
         return "-"
     neg = n < 0
@@ -25,7 +21,6 @@ def format_inr_number(n, decimals=0):
         int_part, frac = s.split(".")
     else:
         int_part, frac = s, ""
-
     if len(int_part) > 3:
         last3 = int_part[-3:]
         rest = int_part[:-3]
@@ -36,7 +31,6 @@ def format_inr_number(n, decimals=0):
         if rest:
             groups.insert(0, rest)
         int_part = ",".join(groups + [last3])
-
     out = int_part
     if decimals > 0:
         out += "." + frac
@@ -51,15 +45,51 @@ def money_inr(n, decimals=0):
     return f"₹{format_inr_number(n, decimals)}"
 
 
-# ---------- Scraper ----------
+# ---------- Scraper (hardened for CI) ----------
 async def scrape_live_ipos():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-        await page.goto(URL, wait_until="networkidle")
+        # Use --no-sandbox for GitHub Actions
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
+        context = await browser.new_context(
+            user_agent=("Mozilla/5.0 (X11; Linux x86_64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"),
+            viewport={"width": 1280, "height": 1800}
+        )
 
-        # keep your original wait approach
-        await asyncio.sleep(10)
+        # Block heavy assets to speed up and reduce “networkidle” flakiness
+        async def _route(route):
+            req = route.request
+            if req.resource_type in {"image", "media", "font", "stylesheet"}:
+                await route.abort()
+            else:
+                await route.continue_()
+        await context.route("**/*", _route)
+
+        page = await context.new_page()
+        page.set_default_timeout(60_000)  # 60s default
+
+        # Robust navigation: use domcontentloaded, then wait for table
+        last_err = None
+        for attempt in range(3):
+            try:
+                await page.goto(URL, wait_until="domcontentloaded", timeout=60_000)
+                # give JS some time to hydrate, then wait for rows
+                await page.wait_for_selector("table tbody tr", timeout=60_000)
+                break
+            except Exception as e:
+                last_err = e
+                if attempt < 2:
+                    await asyncio.sleep(3)  # small backoff and retry
+                else:
+                    await browser.close()
+                    raise
+
+        # Small stabilizing pause; keeps your original spirit without 10s fixed wait
+        await asyncio.sleep(1.0)
 
         rows = await page.query_selector_all("table tbody tr")
         ipo_list = []
@@ -76,7 +106,7 @@ async def scrape_live_ipos():
                 m = re.search(r"\(([-+]?\d+\.?\d*)\s*%", gmp_text)
                 gmp_percent = float(m.group(1)) if m else 0.0
 
-                # Price column (index 5), may be "100 / 105" → take upper band
+                # Price column (index 5) may be "100 / 105" → take upper band
                 price_text = (await cells[5].inner_text()).strip()
                 nums = re.findall(r"\d+(?:\.\d+)?", price_text.replace(",", ""))
                 price = max([float(x) for x in nums]) if nums else None
@@ -121,7 +151,7 @@ def filter_current_ipos(ipos):
     ]
 
 
-# ---------- Message builder (no code blocks; clean text) ----------
+# ---------- Message builder (plain text; Indian commas) ----------
 def compose_telegram_message(ipos):
     if not ipos:
         return "📢 No live IPOs with GMP > 10% are open today."
@@ -151,7 +181,7 @@ def compose_telegram_message(ipos):
         if price and lot:
             section.append(f"▫️ Price: {money_inr(price, 2)} | Lot Size: {format_inr_number(lot)}")
 
-            lot_cost = price * lot  # internal; not printed
+            lot_cost = price * lot  # internal
 
             # Retail: 1 lot
             retail_lots = 1
@@ -170,7 +200,6 @@ def compose_telegram_message(ipos):
             bhni_funds = lot_cost * bhni_lots
             bhni_shares = lot * bhni_lots
 
-            # Plain aligned lines (no backticks, no copy box)
             section.append(f"👤 Retail: {money_inr(retail_funds)}  ({format_inr_number(retail_shares)} shares)")
             section.append(f"👥 S-HNI : {money_inr(shni_funds)}  ({format_inr_number(shni_shares)} shares)")
             section.append(f"🏦 B-HNI : {money_inr(bhni_funds)}  ({format_inr_number(bhni_shares)} shares)")
