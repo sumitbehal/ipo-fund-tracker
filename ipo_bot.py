@@ -173,7 +173,7 @@ def compose_telegram_message(ipos):
 
         section = []
         section.append("━━━━━━━━━━━━━━━━━━━━")
-        section.append(f"📌 {name} IPO O")
+        section.append(f"📌 {name} ")
         section.append("━━━━━━━━━━━━━━━━━━━━")
         section.append(f"▫️ GMP: **{gmp:.2f}%**")
         section.append(f"▫️ Open: {open_dt} → Close: {close_dt}")
