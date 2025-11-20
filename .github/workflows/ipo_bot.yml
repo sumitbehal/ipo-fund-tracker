@@ -13,7 +13,39 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+      - run: pip install playwright python-telegram-botname: Daily IPO Fund Bot
+
+on:
+  schedule:
+    - cron: '30 3 * * *'  # runs at 03:30 UTC (09:00 IST) every day
+  workflow_dispatch:       # allows manual triggering from the GitHub UI
+
+# 1. ADDED: This gives the bot permission to commit changes to the repo
+permissions:
+  contents: write
+
+jobs:
+  ipo-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
       - run: pip install playwright python-telegram-bot
+      
+      - run: playwright install
+      
+      - run: python ipo_bot.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      # 2. ADDED: This step checks if 60 days have passed and makes a dummy commit if needed
+      - name: Keep workflow alive
+        uses: gautamkrishnar/keepalive-workflow@v1
       - run: playwright install
       - run: python ipo_bot.py
         env:
