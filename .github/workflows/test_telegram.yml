@@ -2,25 +2,43 @@ name: Daily IPO Fund Bot
 
 on:
   schedule:
-    - cron: '30 4 * * *'   # 10:00 IST daily
-  workflow_dispatch:       # manual trigger
+    - cron: '30 3 * * *'  # runs at 03:30 UTC (09:00 IST) every day
+  workflow_dispatch:       # allows manual triggering
+
+permissions:
+  contents: write
 
 jobs:
   ipo-bot:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      - name: Install deps
-        run: |
-          pip install playwright python-telegram-bot
-          playwright install
-      - name: Run bot
+      
+
+      - name: Install dependencies
+        run: pip install playwright python-telegram-bot playwright-stealth
+      
+      - name: Install Playwright Browsers
+        run: playwright install chromium
+      
+      - name: Run IPO Bot
+        run: python ipo_bot.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          MIN_GMP: ${{ vars.MIN_GMP }}
-          FUND_PER_IPO_LAKH: ${{ vars.FUND_PER_IPO_LAKH }}
-        run: python ipo_bot.py
+
+      - name: Upload Debug Artifacts
+        if: failure() 
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: |
+            error_screenshot.png
+            error_page.html
+
+      - name: Keep workflow alive
+        uses: gautamkrishnar/keepalive-workflow@v1
