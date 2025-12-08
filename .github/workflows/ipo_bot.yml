@@ -3,7 +3,7 @@ name: Daily IPO Fund Bot
 on:
   schedule:
     - cron: '30 3 * * *'  # runs at 03:30 UTC (09:00 IST) every day
-  workflow_dispatch:       # allows manual triggering from the GitHub UI
+  workflow_dispatch:       # allows manual triggering
 
 permissions:
   contents: write
@@ -17,9 +17,10 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          
+      
+      # CHANGE: Added playwright-stealth to the install command
       - name: Install dependencies
-        run: pip install playwright python-telegram-bot
+        run: pip install playwright python-telegram-bot playwright-stealth
       
       - name: Install Playwright Browsers
         run: playwright install chromium
@@ -30,7 +31,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
-      # --- NEW STEP: UPLOADS SCREENSHOTS IF BOT FAILS ---
       - name: Upload Debug Artifacts
         if: failure() 
         uses: actions/upload-artifact@v4
@@ -40,6 +40,5 @@ jobs:
             error_screenshot.png
             error_page.html
 
-      # Keeps the workflow from being disabled by GitHub after 60 days
       - name: Keep workflow alive
         uses: gautamkrishnar/keepalive-workflow@v1
