@@ -2,25 +2,9 @@ name: Daily IPO Fund Bot
 
 on:
   schedule:
-    - cron: '30 3 * * *'  # runs at 03:30 UTC (09:00 IST) every day
+    - cron: '30 3 * * *'  # runs at 03:30 UTC (09:00 IST) every day
   workflow_dispatch:       # allows manual triggering from the GitHub UI
 
-jobs:
-  ipo-bot:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      - run: pip install playwright python-telegram-botname: Daily IPO Fund Bot
-
-on:
-  schedule:
-    - cron: '30 3 * * *'  # runs at 03:30 UTC (09:00 IST) every day
-  workflow_dispatch:       # allows manual triggering from the GitHub UI
-
-# 1. ADDED: This gives the bot permission to commit changes to the repo
 permissions:
   contents: write
 
@@ -34,20 +18,28 @@ jobs:
         with:
           python-version: '3.11'
           
-      - run: pip install playwright python-telegram-bot
+      - name: Install dependencies
+        run: pip install playwright python-telegram-bot
       
-      - run: playwright install
+      - name: Install Playwright Browsers
+        run: playwright install chromium
       
-      - run: python ipo_bot.py
+      - name: Run IPO Bot
+        run: python ipo_bot.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
-      # 2. ADDED: This step checks if 60 days have passed and makes a dummy commit if needed
+      # --- NEW STEP: UPLOADS SCREENSHOTS IF BOT FAILS ---
+      - name: Upload Debug Artifacts
+        if: failure() 
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: |
+            error_screenshot.png
+            error_page.html
+
+      # Keeps the workflow from being disabled by GitHub after 60 days
       - name: Keep workflow alive
         uses: gautamkrishnar/keepalive-workflow@v1
-      - run: playwright install
-      - run: python ipo_bot.py
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
