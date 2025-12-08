@@ -47,42 +47,32 @@ def money_inr(n, decimals=0):
 
 
 def clean_ipo_name(raw: str) -> str:
-    """
-    Normalize scraped IPO names:
-    - Convert trailing 'IPO X' (O/C/L/U etc.) to just 'IPO'
-    - Ensure final name ends with exactly 'IPO' (no duplicate 'O')
-    Examples:
-      'Pace Digitek IPO O' -> 'Pace Digitek IPO'
-      'Jinkushal Industries IPO' -> 'Jinkushal Industries IPO'
-      'TruAlt Bioenergy' -> 'TruAlt Bioenergy IPO'
-    """
     if not raw:
         return raw
     s = raw.strip()
-    # Replace 'IPO <letter>' with 'IPO'
     s = re.sub(r"\s+IPO\s*[A-Z]?$", " IPO", s, flags=re.IGNORECASE)
-    # Ensure it ends with IPO
     if not s.upper().endswith("IPO"):
         s = s.rstrip() + " IPO"
     return s.strip()
 
 
-# ---------- Scraper (hardened for CI) ----------
+# ---------- Scraper (Hardened + Debugging) ----------
 async def scrape_live_ipos():
     async with async_playwright() as p:
-        # CI-friendly flags
         browser = await p.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
+        
+        # CHANGE 1: Use a standard Windows Desktop User Agent & Viewport
         context = await browser.new_context(
-            user_agent=("Mozilla/5.0 (X11; Linux x86_64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/120.0.0.0 Safari/537.36"),
-            viewport={"width": 1280, "height": 1800}
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080},
+            locale="en-US",
+            timezone_id="Asia/Kolkata"
         )
 
-        # Block heavy assets (fewer timeouts)
+        # Block heavy assets to speed up loading
         async def _route(route):
             req = route.request
             if req.resource_type in {"image", "media", "font", "stylesheet"}:
@@ -94,72 +84,81 @@ async def scrape_live_ipos():
         page = await context.new_page()
         page.set_default_timeout(60_000)
 
-        # Robust navigation (3 retries)
-        for attempt in range(3):
-            try:
-                await page.goto(URL, wait_until="domcontentloaded", timeout=60_000)
-                await page.wait_for_selector("table tbody tr", timeout=60_000)
-                break
-            except Exception:
-                if attempt == 2:
-                    await browser.close()
-                    raise
-                await asyncio.sleep(3)
-
-        await asyncio.sleep(1.0)  # brief settle
-
-        rows = await page.query_selector_all("table tbody tr")
         ipo_list = []
-        for row in rows:
-            cells = await row.query_selector_all("td")
-            # expected: name, gmp, rating, sub, gmp(l/h), price, ipo size, lot, open, close
-            if len(cells) < 10:
-                continue
+
+        try:
+            # CHANGE 2: Wait for network idle to ensure anti-bot scripts finish
+            await page.goto(URL, wait_until="domcontentloaded", timeout=60_000)
+            
             try:
-                raw_name = (await cells[0].inner_text()).strip()
-                name = clean_ipo_name(raw_name)
-
-                # GMP % (e.g., "₹32 (14.61%)")
-                gmp_text = (await cells[1].inner_text()).strip()
-                m = re.search(r"\(([-+]?\d+\.?\d*)\s*%", gmp_text)
-                gmp_percent = float(m.group(1)) if m else 0.0
-
-                # Price column (index 5) may be "100 / 105" → use upper band
-                price_text = (await cells[5].inner_text()).strip()
-                nums = re.findall(r"\d+(?:\.\d+)?", price_text.replace(",", ""))
-                price = max([float(x) for x in nums]) if nums else None
-
-                # Lot size (index 7)
-                lot_text = (await cells[7].inner_text()).strip()
-                mlot = re.search(r"\d+", lot_text.replace(",", ""))
-                lot_size = int(mlot.group()) if mlot else None
-
-                # Dates (index 8, 9) like "26-Sep"
-                open_date_str = (await cells[8].inner_text()).strip()
-                close_date_str = (await cells[9].inner_text()).strip()
-                year = datetime.now().year
-                open_date = datetime.strptime(f"{open_date_str}-{year}", DATE_FORMAT)
-                close_date = datetime.strptime(f"{close_date_str}-{year}", DATE_FORMAT)
-                # handle wrap across year
-                if close_date < open_date:
-                    close_date = datetime.strptime(f"{close_date_str}-{year+1}", DATE_FORMAT)
-
-                ipo_list.append({
-                    "name": name,
-                    "gmp_percent": gmp_percent,
-                    "open_date": open_date,
-                    "close_date": close_date,
-                    "price": price,
-                    "lot_size": lot_size
-                })
+                await page.wait_for_load_state("networkidle", timeout=10_000)
             except Exception:
-                continue
+                pass  # Ignore network idle timeout, proceed to selector check
 
-        await browser.close()
+            # CHANGE 3: The Wait - Wrapped in error handling for debugging
+            await page.wait_for_selector("table tbody tr", timeout=60_000)
+
+            rows = await page.query_selector_all("table tbody tr")
+            
+            for row in rows:
+                cells = await row.query_selector_all("td")
+                if len(cells) < 10:
+                    continue
+                try:
+                    raw_name = (await cells[0].inner_text()).strip()
+                    name = clean_ipo_name(raw_name)
+
+                    gmp_text = (await cells[1].inner_text()).strip()
+                    m = re.search(r"\(([-+]?\d+\.?\d*)\s*%", gmp_text)
+                    gmp_percent = float(m.group(1)) if m else 0.0
+
+                    price_text = (await cells[5].inner_text()).strip()
+                    nums = re.findall(r"\d+(?:\.\d+)?", price_text.replace(",", ""))
+                    price = max([float(x) for x in nums]) if nums else None
+
+                    lot_text = (await cells[7].inner_text()).strip()
+                    mlot = re.search(r"\d+", lot_text.replace(",", ""))
+                    lot_size = int(mlot.group()) if mlot else None
+
+                    open_date_str = (await cells[8].inner_text()).strip()
+                    close_date_str = (await cells[9].inner_text()).strip()
+                    year = datetime.now().year
+                    
+                    try:
+                        open_date = datetime.strptime(f"{open_date_str}-{year}", DATE_FORMAT)
+                        close_date = datetime.strptime(f"{close_date_str}-{year}", DATE_FORMAT)
+                        if close_date < open_date:
+                            close_date = datetime.strptime(f"{close_date_str}-{year+1}", DATE_FORMAT)
+                    except ValueError:
+                        continue # Skip rows with invalid dates
+
+                    ipo_list.append({
+                        "name": name,
+                        "gmp_percent": gmp_percent,
+                        "open_date": open_date,
+                        "close_date": close_date,
+                        "price": price,
+                        "lot_size": lot_size
+                    })
+                except Exception:
+                    continue
+
+        except Exception as e:
+            print(f"❌ Error encountered: {e}")
+            # CHANGE 4: Capture Screenshot and HTML for debugging
+            await page.screenshot(path="error_screenshot.png")
+            with open("error_page.html", "w", encoding="utf-8") as f:
+                f.write(await page.content())
+            print("📸 Saved error_screenshot.png and error_page.html for debugging.")
+            raise e  # Re-raise to fail the workflow
+
+        finally:
+            await browser.close()
+
         return ipo_list
 
 
-# ---------- Filters (unchanged logic) ----------
+# ---------- Filters (unchanged) ----------
 def filter_current_ipos(ipos):
     today = datetime.now().date()
     return [
@@ -169,7 +168,7 @@ def filter_current_ipos(ipos):
     ]
 
 
-# ---------- Message builder (plain text; Indian commas) ----------
+# ---------- Message builder (unchanged) ----------
 def compose_telegram_message(ipos):
     if not ipos:
         return "📢 No live IPOs with GMP > 10% are open today."
@@ -191,29 +190,25 @@ def compose_telegram_message(ipos):
 
         section = []
         section.append("━━━━━━━━━━━━━━━━━━━━")
-        section.append(f"📌 {name}")  # already normalized to end with "IPO"
+        section.append(f"📌 {name}")
         section.append("━━━━━━━━━━━━━━━━━━━━")
         section.append(f"▫️ GMP: **{gmp:.2f}%**")
         section.append(f"▫️ Open: {open_dt} → Close: {close_dt}")
 
         if price and lot:
             section.append(f"▫️ Price: {money_inr(price, 2)} | Lot Size: {format_inr_number(lot)}")
+            lot_cost = price * lot
 
-            lot_cost = price * lot  # internal for funds math
-
-            # Retail: 1 lot
             retail_lots = 1
             retail_funds = lot_cost
             retail_shares = lot * retail_lots
 
-            # S-HNI: 14 lots; if that exceeds ₹2,00,000 → use 13 lots
             shni_lots = 14
             if lot_cost * shni_lots > 200_000:
                 shni_lots = 13
             shni_funds = lot_cost * shni_lots
             shni_shares = lot * shni_lots
 
-            # B-HNI: first multiple after ₹10,00,000
             bhni_lots = math.ceil(1_000_000 / lot_cost)
             bhni_funds = lot_cost * bhni_lots
             bhni_shares = lot * bhni_lots
@@ -228,7 +223,7 @@ def compose_telegram_message(ipos):
         else:
             section.append("_Price/Lot information not available_")
 
-        section.append("")  # blank line
+        section.append("") 
         body_parts.append("\n".join(section))
 
     totals = []
